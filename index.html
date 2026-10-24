@@ -53,7 +53,21 @@ input[type=range]{flex:1;accent-color:var(--accent);min-height:40px}
   </div>
   <div class="msg" id="msg" hidden></div>
   <div class="dock" id="dock" hidden>
-    <button class="primary" id="place" disabled>הצב את המבצר כאן</button>
+    <div id="startBtns" class="grid2">
+      <button class="primary" id="place" disabled>הצב כאן</button>
+      <button id="alignBtn" disabled>התאם לשרידים</button>
+    </div>
+    <div id="alignPanel" hidden style="display:flex;flex-direction:column;gap:10px">
+      <div class="small" id="alignStep" style="font-size:14px;color:var(--ink)"></div>
+      <div class="grid2" role="group" aria-label="גודל השחזור">
+        <button id="fitOn" aria-pressed="true">התאם גודל לשרידים</button>
+        <button id="fitOff" aria-pressed="false">גודל מקורי</button>
+      </div>
+      <div class="grid2">
+        <button class="primary" id="mark" disabled>סמן נקודה 1</button>
+        <button id="alignCancel">ביטול</button>
+      </div>
+    </div>
     <div id="controls" hidden style="display:flex;flex-direction:column;gap:10px">
       <div class="grid2" role="group" aria-label="גודל">
         <button id="sModel" aria-pressed="true">דגם קטן</button>
@@ -68,6 +82,23 @@ input[type=range]{flex:1;accent-color:var(--accent);min-height:40px}
         <button id="again">הצב מחדש</button>
         <button id="rotL" aria-label="סובב שמאלה">סובב שמאלה</button>
       </div>
+      <button id="fineToggle" aria-pressed="false">כיוונון עדין</button>
+      <div id="fine" hidden style="display:flex;flex-direction:column;gap:6px">
+        <div class="grid3">
+          <button data-n="right">ימינה</button>
+          <button data-n="fwd">רחוק יותר</button>
+          <button data-n="left">שמאלה</button>
+        </div>
+        <div class="grid3">
+          <button data-n="rcw">סובב 1° ימינה</button>
+          <button data-n="back">קרוב יותר</button>
+          <button data-n="rccw">סובב 1° שמאלה</button>
+        </div>
+        <div class="grid2">
+          <button data-n="up">הגבה 5 ס״מ</button>
+          <button data-n="down">הנמך 5 ס״מ</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -76,7 +107,8 @@ input[type=range]{flex:1;accent-color:var(--accent);min-height:40px}
   <div class="card">
     <h1>חלון לעבר</h1>
     <p>מבצר מימי הורדוס יעמוד על הקרקע מולך. אפשר להתקרב, להקיף אותו ולעבור בשער. הוא נשאר במקום גם כשאתה זז.</p>
-    <p class="small">עמוד בשטח פתוח ומואר, וכוון את המצלמה אל הקרקע. לגודל אמיתי צריך כ־50 מטר פנויים, למשל מגרש או פארק.</p>
+    <p class="small">באתר עם שרידים: בחר "התאם לשרידים" וסמן את שתי הפינות של הקיר הקדמי, בנקודה שבה הקיר פוגש את הקרקע. השחזור יתיישב ביניהן.</p>
+    <p class="small">בלי שרידים: "הצב כאן" מציב דגם על הקרקע. לגודל אמיתי צריך כ־50 מטר פנויים.</p>
     <button class="primary" id="start">התחל מציאות רבודה</button>
     <p class="small warn" id="unsupported" hidden></p>
   </div>
@@ -174,6 +206,7 @@ input[type=range]{flex:1;accent-color:var(--accent);min-height:40px}
         const obj = gltf.scene;
         obj.traverse(o => { if (o.isMesh){ o.castShadow = o.receiveShadow = true; const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(m => { m.transparent = true; mats.push(m); }); } });
         fort.visible = false; site.add(obj); $('modelChip').hidden = false;
+        const size = new THREE.Box3().setFromObject(obj).getSize(new THREE.Vector3()); if (size.x > 0.5) MODEL_SPAN = size.x;
       });
     }).catch(() => {});
   }
@@ -188,10 +221,16 @@ input[type=range]{flex:1;accent-color:var(--accent);min-height:40px}
   // ---------- State ----------
   const SCALES = {model: 1/40, real: 1};
   let scaleKey = 'model', placed = false, hitSource = null, hitReq = false, session = null;
+  // Alignment: the model's front wall runs from x=-SPAN/2 to x=+SPAN/2 along z=0, interior toward -Z
+  let MODEL_SPAN = 54, customScale = 1, fitScale = true, alignMode = false, alignPts = [];
+  const curScale = () => scaleKey === 'fit' ? customScale : SCALES[scaleKey];
+  const markerMat = new THREE.MeshBasicMaterial({color:0xE3A857});
+  const markers = [0,1].map(() => { const m = new THREE.Mesh(new THREE.CylinderGeometry(.04,.04,1,12), markerMat); m.position.y = .5; const g = new THREE.Group(); g.add(m); g.visible = false; scene.add(g); return g; });
+  const xrCamPos = () => { const c = new THREE.Vector3(); renderer.xr.getCamera(camera).getWorldPosition(c); return c; };
   const status = (t, live) => { $('status').textContent = t; $('dot').style.background = live ? 'var(--ok)' : 'var(--accent)'; };
   const msg = (t) => { const m = $('msg'); if (t){ m.textContent = t; m.hidden = false; } else m.hidden = true; };
   const applyScale = () => {
-    const s = SCALES[scaleKey]; site.scale.setScalar(s);
+    const s = curScale(); site.scale.setScalar(s);
     sun.position.copy(site.position).add(new THREE.Vector3(-30,60,-10).multiplyScalar(s)); sun.target.position.copy(site.position);
     const e = 45*s; Object.assign(sun.shadow.camera, {left:-e,right:e,top:e,bottom:-e,near:.01,far:200*Math.max(s,.05)}); sun.shadow.camera.updateProjectionMatrix();
     $('sModel').setAttribute('aria-pressed', String(scaleKey==='model')); $('sReal').setAttribute('aria-pressed', String(scaleKey==='real'));
@@ -206,12 +245,76 @@ input[type=range]{flex:1;accent-color:var(--accent);min-height:40px}
     const cam = new THREE.Vector3(); renderer.xr.getCamera(camera).getWorldPosition(cam);
     site.rotation.set(0, Math.atan2(cam.x - p.x, cam.z - p.z), 0);
     site.visible = true; placed = true; reticle.visible = false; applyScale();
-    $('place').hidden = true; $('controls').hidden = false;
+    $('startBtns').hidden = true; $('controls').hidden = false;
     msg(scaleKey==='real' ? 'השער מולך. אפשר ללכת פנימה.' : 'הקף את הדגם. לחץ "גודל אמיתי" כדי לעמוד מול השער.');
     setTimeout(()=>msg(null), 3500);
   }
   $('place').addEventListener('click', place);
-  $('again').addEventListener('click', () => { placed = false; site.visible = false; $('place').hidden = false; $('controls').hidden = true; msg('כוון אל הקרקע ובחר נקודה חדשה'); });
+  $('again').addEventListener('click', () => { resetPlacement(); msg('כוון אל הקרקע ובחר שוב'); });
+  function resetPlacement(){
+    placed = false; alignMode = false; alignPts = []; site.visible = false; markers.forEach(m => m.visible = false);
+    $('startBtns').hidden = false; $('alignPanel').hidden = true; $('controls').hidden = true;
+    if (scaleKey === 'fit'){ scaleKey = 'model'; applyScale(); }
+  }
+
+  // ---------- Two-point alignment to real ruins ----------
+  const STEP_TEXT = [
+    'נקודה 1: כוון את הטבעת לבסיס פינה אחת של הקיר הקדמי, היכן שהקיר פוגש את הקרקע.',
+    'נקודה 2: עכשיו לבסיס הפינה השנייה של אותו קיר.'
+  ];
+  function startAlign(){
+    alignMode = true; alignPts = []; placed = false; site.visible = false; markers.forEach(m => m.visible = false);
+    $('startBtns').hidden = true; $('controls').hidden = true; $('alignPanel').hidden = false;
+    $('alignStep').textContent = STEP_TEXT[0]; $('mark').textContent = 'סמן נקודה 1'; msg(null);
+  }
+  function markPoint(){
+    if (!alignMode || !reticle.visible) return;
+    const p = new THREE.Vector3().setFromMatrixPosition(reticle.matrix);
+    markers[alignPts.length].position.copy(p); markers[alignPts.length].visible = true;
+    alignPts.push(p);
+    if (alignPts.length === 1){ $('alignStep').textContent = STEP_TEXT[1]; $('mark').textContent = 'סמן נקודה 2'; return; }
+    applyAlign();
+  }
+  function applyAlign(){
+    let [p1, p2] = alignPts.map(v => v.clone());
+    const theta = (a, b) => Math.atan2(-(b.z - a.z), b.x - a.x);
+    let th = theta(p1, p2);
+    const mid = p1.clone().add(p2).multiplyScalar(.5);
+    const front = new THREE.Vector3(Math.sin(th), 0, Math.cos(th));
+    // The front of the model must face the visitor; if not, swap the points
+    if (xrCamPos().sub(mid).dot(front) < 0){ [p1, p2] = [p2, p1]; th = theta(p1, p2); }
+    const len = Math.hypot(p2.x - p1.x, p2.z - p1.z);
+    if (len < 0.3){ msg('הנקודות קרובות מדי. סמן את שתי הפינות של הקיר.'); alignPts = []; markers.forEach(m => m.visible = false); $('alignStep').textContent = STEP_TEXT[0]; $('mark').textContent = 'סמן נקודה 1'; return; }
+    customScale = fitScale ? len / MODEL_SPAN : 1; scaleKey = 'fit';
+    site.position.set(mid.x, (p1.y + p2.y) / 2, mid.z); site.rotation.set(0, th, 0);
+    site.visible = true; placed = true; alignMode = false; reticle.visible = false; applyScale();
+    $('alignPanel').hidden = true; $('controls').hidden = false; markers.forEach(m => m.visible = false);
+    msg('השחזור מותאם לקיר. אם הוא לא יושב בדיוק, השתמש ב"כיוונון עדין".'); setTimeout(() => msg(null), 4000);
+  }
+  $('alignBtn').addEventListener('click', startAlign);
+  $('mark').addEventListener('click', markPoint);
+  $('alignCancel').addEventListener('click', () => { resetPlacement(); });
+  $('fitOn').addEventListener('click', () => { fitScale = true; $('fitOn').setAttribute('aria-pressed','true'); $('fitOff').setAttribute('aria-pressed','false'); });
+  $('fitOff').addEventListener('click', () => { fitScale = false; $('fitOn').setAttribute('aria-pressed','false'); $('fitOff').setAttribute('aria-pressed','true'); });
+
+  // ---------- Fine adjustment, relative to where the visitor is looking ----------
+  $('fineToggle').addEventListener('click', () => { const on = $('fine').hidden; $('fine').hidden = !on; $('fineToggle').setAttribute('aria-pressed', String(on)); });
+  document.querySelectorAll('[data-n]').forEach(b => b.addEventListener('click', () => {
+    const f = new THREE.Vector3(); renderer.xr.getCamera(camera).getWorldDirection(f); f.y = 0;
+    if (f.lengthSq() < 1e-6) f.set(0,0,-1); f.normalize();
+    const r = new THREE.Vector3(-f.z, 0, f.x), step = 0.1, deg = Math.PI/180;
+    switch (b.dataset.n){
+      case 'fwd': site.position.addScaledVector(f, step); break;
+      case 'back': site.position.addScaledVector(f, -step); break;
+      case 'right': site.position.addScaledVector(r, step); break;
+      case 'left': site.position.addScaledVector(r, -step); break;
+      case 'up': site.position.y += .05; break;
+      case 'down': site.position.y -= .05; break;
+      case 'rcw': site.rotation.y -= deg; break;
+      case 'rccw': site.rotation.y += deg; break;
+    }
+    applyScale();
+  }));
   $('sModel').addEventListener('click', () => { scaleKey = 'model'; applyScale(); });
   $('sReal').addEventListener('click', () => { scaleKey = 'real'; applyScale(); msg('השער בנקודה שבחרת. המבצר נמשך כ־40 מטר לאחור.'); setTimeout(()=>msg(null), 3500); });
   $('rotR').addEventListener('click', () => site.rotation.y -= Math.PI/12);
@@ -234,10 +337,10 @@ input[type=range]{flex:1;accent-color:var(--accent);min-height:40px}
       session.requestLightProbe().then(p => { lightProbeXR = p; }).catch(() => {});
     }
     await renderer.xr.setSession(session);
-    $('sheet').hidden = true; $('dock').hidden = false; $('exit').hidden = false; $('place').hidden = false; $('controls').hidden = true;
+    $('sheet').hidden = true; $('dock').hidden = false; $('exit').hidden = false; resetPlacement();
     status('מחפש קרקע', false); msg('הזז את הטלפון לאט מצד לצד, עם המצלמה אל הקרקע');
-    session.addEventListener('end', () => { hitSource = null; hitReq = false; placed = false; site.visible = false; reticle.visible = false; $('sheet').hidden = false; $('dock').hidden = true; $('exit').hidden = true; msg(null); status('מוכן', false); });
-    session.addEventListener('select', () => { if (!placed) place(); });
+    session.addEventListener('end', () => { hitSource = null; hitReq = false; resetPlacement(); reticle.visible = false; $('sheet').hidden = false; $('dock').hidden = true; $('exit').hidden = true; msg(null); status('מוכן', false); });
+    session.addEventListener('select', () => { if (alignMode) markPoint(); else if (!placed) place(); });
   }
   $('exit').addEventListener('click', () => session && session.end());
   $('start').addEventListener('click', startAR);
@@ -271,7 +374,7 @@ input[type=range]{flex:1;accent-color:var(--accent);min-height:40px}
       if (est){
         envProbe.sh.fromArray(est.sphericalHarmonicsCoefficients); envProbe.intensity = 1; hemi.intensity = 0.15;
         const d = est.primaryLightDirection, i = est.primaryLightIntensity;
-        const s = SCALES[scaleKey];
+        const s = curScale();
         sun.position.set(site.position.x + d.x*60*s, site.position.y + d.y*60*s, site.position.z + d.z*60*s);
         sun.intensity = Math.min(3, Math.max(.2, Math.max(i.x, i.y, i.z)));
         sun.color.setRGB(i.x, i.y, i.z).multiplyScalar(1/Math.max(i.x, i.y, i.z, 1e-3));
@@ -284,14 +387,16 @@ input[type=range]{flex:1;accent-color:var(--accent);min-height:40px}
         s.requestReferenceSpace('viewer').then(vs => s.requestHitTestSource({space:vs})).then(src => hitSource = src);
         hitReq = true;
       }
-      if (hitSource && !placed){
+      if (hitSource && (!placed || alignMode)){
         const hits = frame.getHitTestResults(hitSource);
-        if (hits.length){
+        const ok = hits.length > 0;
+        if (ok){
           const pose = hits[0].getPose(ref);
           reticle.visible = true; reticle.matrix.fromArray(pose.transform.matrix);
-          $('place').disabled = false; status('קרקע זוהתה', true);
-          if (!$('msg').hidden && $('msg').textContent.startsWith('הזז')) msg('הקש על "הצב" או על המסך');
-        } else { reticle.visible = false; $('place').disabled = true; }
+          status('קרקע זוהתה', true);
+          if (!$('msg').hidden && $('msg').textContent.startsWith('הזז')) msg('בחר "הצב כאן" או "התאם לשרידים"');
+        } else { reticle.visible = false; }
+        $('place').disabled = !ok; $('alignBtn').disabled = !ok; $('mark').disabled = !ok;
       }
     }
     renderer.render(scene, camera);
