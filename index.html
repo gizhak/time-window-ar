@@ -44,7 +44,11 @@ input[type=range]{flex:1;accent-color:var(--accent);min-height:40px}
 <body>
 <div id="overlay">
   <div class="top">
-    <div class="chip"><span class="dot" id="dot"></span><span id="status">מוכן</span></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <div class="chip"><span class="dot" id="dot"></span><span id="status">מוכן</span></div>
+      <div class="chip" id="light" hidden>תאורה מותאמת לסביבה</div>
+      <div class="chip" id="modelChip" hidden>מודל מלא</div>
+    </div>
     <button id="exit" hidden style="min-height:40px;padding:0 14px;border-radius:999px;background:var(--glass)">יציאה</button>
   </div>
   <div class="msg" id="msg" hidden></div>
@@ -79,6 +83,7 @@ input[type=range]{flex:1;accent-color:var(--accent);min-height:40px}
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script>
 (function(){
   const $ = (id) => document.getElementById(id);
@@ -87,12 +92,17 @@ input[type=range]{flex:1;accent-color:var(--accent);min-height:40px}
   renderer.setSize(innerWidth, innerHeight);
   renderer.shadowMap.enabled = true;
   renderer.xr.enabled = true;
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.0;
   document.body.prepend(renderer.domElement);
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(65, innerWidth/innerHeight, 0.01, 800);
 
-  scene.add(new THREE.HemisphereLight(0xfff3dd, 0x6b5a40, 0.8));
+  const hemi = new THREE.HemisphereLight(0xfff3dd, 0x6b5a40, 0.8); scene.add(hemi);
+  const envProbe = new THREE.LightProbe(); envProbe.intensity = 0; scene.add(envProbe);
+  let lightProbeXR = null, lightLive = false;
   const sun = new THREE.DirectionalLight(0xffe2b0, 0.9);
   sun.castShadow = true; sun.shadow.mapSize.set(1024,1024);
   Object.assign(sun.shadow.camera, {left:-45,right:45,top:45,bottom:-45,near:1,far:200});
@@ -102,9 +112,39 @@ input[type=range]{flex:1;accent-color:var(--accent);min-height:40px}
   const site = new THREE.Group(); site.visible = false; scene.add(site);
   const fort = new THREE.Group(); site.add(fort);
   const mats = [];
-  const M = (color, rough=.9) => { const m = new THREE.MeshStandardMaterial({color, roughness:rough, transparent:true}); mats.push(m); return m; };
-  const stone = M(0xe2cfa6), stoneDark = M(0xc7ae82), roof = M(0xa8532f,.8), wood = M(0x5a3d22), marble = M(0xf1eadb,.6), cloth = M(0x7a2430,1), skin = M(0xb07d58);
-  const box = (w,h,d,mat,x,y,z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat); m.position.set(x,y,z); m.castShadow = m.receiveShadow = true; fort.add(m); return m; };
+  // ---- Procedural textures: ashlar masonry, plaster, wood grain, roof tiles (no external images) ----
+  function noiseCanvas(size, paint){ const c = document.createElement('canvas'); c.width = c.height = size; const g = c.getContext('2d'); paint(g, size); return c; }
+  function speckle(g, s, n, alpha){ for(let i=0;i<n;i++){ const v = Math.random()*255|0; g.fillStyle = `rgba(${v},${v},${v},${alpha*Math.random()})`; g.fillRect(Math.random()*s, Math.random()*s, 1+Math.random()*3, 1+Math.random()*3); } }
+  function ashlar(base){ return noiseCanvas(512, (g,s) => {
+    g.fillStyle = base; g.fillRect(0,0,s,s);
+    const rows = 8, rh = s/rows;
+    for(let r=0;r<rows;r++){ let x = (r%2)*-(s/6); while(x < s){ const w = s/4 + (Math.random()-.5)*s/8; const l = 0.85 + Math.random()*0.3;
+      g.fillStyle = `rgba(${l>1?255:0},${l>1?240:0},${l>1?210:0},${Math.abs(l-1)*0.9})`; g.fillRect(x+3, r*rh+3, w-6, rh-6);
+      g.strokeStyle = 'rgba(70,55,35,.55)'; g.lineWidth = 4; g.strokeRect(x, r*rh, w, rh);
+      g.strokeStyle = 'rgba(255,245,225,.25)'; g.lineWidth = 2; g.beginPath(); g.moveTo(x+4, r*rh+5); g.lineTo(x+w-4, r*rh+5); g.stroke();
+      x += w; } }
+    speckle(g, s, 9000, .18);
+    for(let i=0;i<40;i++){ g.fillStyle = `rgba(90,75,50,${.05+Math.random()*.08})`; g.beginPath(); g.arc(Math.random()*s, Math.random()*s, 10+Math.random()*40, 0, 7); g.fill(); }
+  }); }
+  function plaster(base){ return noiseCanvas(256, (g,s) => { g.fillStyle = base; g.fillRect(0,0,s,s); speckle(g, s, 5000, .12); }); }
+  function woodGrain(){ return noiseCanvas(256, (g,s) => { g.fillStyle = '#6b4a2b'; g.fillRect(0,0,s,s); for(let y=0;y<s;y+=2){ g.fillStyle = `rgba(30,18,8,${Math.random()*.25})`; g.fillRect(0,y,s,1+Math.random()*2); } for(let x=0;x<s;x+=s/6){ g.fillStyle='rgba(20,12,5,.6)'; g.fillRect(x,0,3,s);} }); }
+  function tiles(){ return noiseCanvas(256, (g,s) => { g.fillStyle = '#a5502c'; g.fillRect(0,0,s,s); const n=8, h=s/n; for(let r=0;r<n;r++){ for(let c=0;c<n;c++){ const off=(r%2)*h/2; g.fillStyle = `rgba(${120+Math.random()*60|0},${50+Math.random()*30|0},${25+Math.random()*20|0},1)`; g.fillRect(c*h+off+2, r*h+2, h-4, h-6); g.fillStyle='rgba(0,0,0,.35)'; g.fillRect(c*h+off, r*h+h-5, h, 5);} } }); }
+  const tex = (canvas, metersPerTile) => { const t = new THREE.CanvasTexture(canvas); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.encoding = THREE.sRGBEncoding; t.anisotropy = 4; t.userData = {m: metersPerTile}; return t; };
+  const M = (color, rough=.9, map=null) => {
+    const opts = {color, roughness:rough, transparent:true};
+    if (map){ opts.map = map; opts.bumpMap = map; opts.bumpScale = 0.04; opts.color = 0xffffff; }
+    const m = new THREE.MeshStandardMaterial(opts); mats.push(m); return m;
+  };
+  // Scale box UVs so texture size stays constant in metres regardless of box size
+  function scaleUVs(geo, w, h, d, mpt){
+    const uv = geo.attributes.uv, dims = [[d,h],[d,h],[w,d],[w,d],[w,h],[w,h]];
+    for(let f=0; f<6; f++) for(let k=0;k<4;k++){ const i=f*4+k; uv.setXY(i, uv.getX(i)*dims[f][0]/mpt, uv.getY(i)*dims[f][1]/mpt); }
+    uv.needsUpdate = true;
+  }
+  const stone = M(0, .92, tex(ashlar('#d9c49b'), 4)), stoneDark = M(0, .95, tex(ashlar('#bfa478'), 4)),
+        roof = M(0, .8, tex(tiles(), 2)), wood = M(0, .85, tex(woodGrain(), 2)), marble = M(0, .45, tex(plaster('#efe7d6'), 3)),
+        cloth = M(0x7a2430,1), skin = M(0xb07d58);
+  const box = (w,h,d,mat,x,y,z) => { const geo = new THREE.BoxGeometry(w,h,d); if (mat.map) scaleUVs(geo, w, h, d, mat.map.userData.m || 4); const m = new THREE.Mesh(geo, mat); m.position.set(x,y,z); m.castShadow = m.receiveShadow = true; fort.add(m); return m; };
   const W = 9, wz = -1.1;
   box(18,W,2.2,stone,-18,W/2,wz); box(18,W,2.2,stone,18,W/2,wz);
   box(5.2,W-5.5,2.2,stone,0,W-(W-5.5)/2,wz);
@@ -122,10 +162,21 @@ input[type=range]{flex:1;accent-color:var(--accent);min-height:40px}
   const gable = new THREE.Mesh(new THREE.CylinderGeometry(0,9,4,4,1), roof); gable.rotation.y=Math.PI/4; gable.scale.set(1.5,1,.85); gable.position.set(0,12.8,-33); gable.castShadow=true; fort.add(gable);
   for(let i=0;i<6;i++) box(1.6,3,.2,wood,-10+i*4,4.5,-25.9);
   // courtyard floor
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(50,38), M(0xcdb68c,1)); floor.rotation.x=-Math.PI/2; floor.position.set(0,.02,-21); floor.receiveShadow=true; fort.add(floor);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(50,38), (() => { const t = tex(ashlar('#c9b086'), 4); t.repeat.set(50/4, 38/4); return M(0, 1, t); })()); floor.rotation.x=-Math.PI/2; floor.position.set(0,.02,-21); floor.receiveShadow=true; fort.add(floor);
   // people for scale
   const fig = (x,z,col) => { const g = new THREE.Group(); const b = new THREE.Mesh(new THREE.CylinderGeometry(.22,.3,1.25,10), M(col)); b.position.y=.65; const h = new THREE.Mesh(new THREE.SphereGeometry(.17,12,10), skin); h.position.y=1.45; g.add(b,h); g.children.forEach(c=>c.castShadow=true); g.position.set(x,0,z); fort.add(g); };
   fig(-1,3,0xe8dcc4); fig(1.2,4,0x8c6a3f); fig(-4,-8,0xd9c49b); fig(5,-12,0x7a2430); fig(-8,-20,0xe8dcc4);
+  // ---- Optional real model: drop a file at models/site.glb (metres, gate facing +Z, ground at y=0, gate centre at origin) ----
+  if (THREE.GLTFLoader){
+    fetch('models/site.glb', {method:'HEAD'}).then(r => {
+      if (!r.ok) return;
+      new THREE.GLTFLoader().load('models/site.glb', (gltf) => {
+        const obj = gltf.scene;
+        obj.traverse(o => { if (o.isMesh){ o.castShadow = o.receiveShadow = true; const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach(m => { m.transparent = true; mats.push(m); }); } });
+        fort.visible = false; site.add(obj); $('modelChip').hidden = false;
+      });
+    }).catch(() => {});
+  }
   // soft shadow on the real ground
   const shadowPlane = new THREE.Mesh(new THREE.PlaneGeometry(120,120), new THREE.ShadowMaterial({opacity:.35}));
   shadowPlane.rotation.x = -Math.PI/2; shadowPlane.position.set(0,.005,-20); shadowPlane.receiveShadow = true; site.add(shadowPlane);
@@ -172,12 +223,16 @@ input[type=range]{flex:1;accent-color:var(--accent);min-height:40px}
   // ---------- Session ----------
   async function startAR(){
     try{
-      session = await navigator.xr.requestSession('immersive-ar', {requiredFeatures:['hit-test'], optionalFeatures:['dom-overlay','local-floor'], domOverlay:{root:$('overlay')}});
+      session = await navigator.xr.requestSession('immersive-ar', {requiredFeatures:['hit-test'], optionalFeatures:['dom-overlay','local-floor','light-estimation'], domOverlay:{root:$('overlay')}});
     }catch(err){
       $('unsupported').textContent = 'לא הצלחתי לפתוח מציאות רבודה: ' + (err.message || err) + '. ודא ש־"Google Play Services for AR" מותקן ומעודכן, ושהדף נפתח ב־Chrome.';
       $('unsupported').hidden = false; return;
     }
     renderer.xr.setReferenceSpaceType('local');
+    lightProbeXR = null;
+    if (session.requestLightProbe){
+      session.requestLightProbe().then(p => { lightProbeXR = p; }).catch(() => {});
+    }
     await renderer.xr.setSession(session);
     $('sheet').hidden = true; $('dock').hidden = false; $('exit').hidden = false; $('place').hidden = false; $('controls').hidden = true;
     status('מחפש קרקע', false); msg('הזז את הטלפון לאט מצד לצד, עם המצלמה אל הקרקע');
@@ -211,6 +266,18 @@ input[type=range]{flex:1;accent-color:var(--accent);min-height:40px}
 
   // ---------- Frame loop ----------
   renderer.setAnimationLoop((t, frame) => {
+    if (frame && lightProbeXR && frame.getLightEstimate){
+      const est = frame.getLightEstimate(lightProbeXR);
+      if (est){
+        envProbe.sh.fromArray(est.sphericalHarmonicsCoefficients); envProbe.intensity = 1; hemi.intensity = 0.15;
+        const d = est.primaryLightDirection, i = est.primaryLightIntensity;
+        const s = SCALES[scaleKey];
+        sun.position.set(site.position.x + d.x*60*s, site.position.y + d.y*60*s, site.position.z + d.z*60*s);
+        sun.intensity = Math.min(3, Math.max(.2, Math.max(i.x, i.y, i.z)));
+        sun.color.setRGB(i.x, i.y, i.z).multiplyScalar(1/Math.max(i.x, i.y, i.z, 1e-3));
+        if (!lightLive){ lightLive = true; $('light').hidden = false; }
+      }
+    }
     if (frame){
       const ref = renderer.xr.getReferenceSpace(); const s = renderer.xr.getSession();
       if (!hitReq){
