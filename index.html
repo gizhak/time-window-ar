@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>חלון לעבר</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700&family=Heebo:wght@400;500;700&display=swap">
+<style>
+:root{
+  --ink:#F4EEE3; --muted:#C9BFAE; --glass:rgba(22,19,15,.84); --line:rgba(244,238,227,.22);
+  --accent:#E3A857; --accent-ink:#1A140C; --ok:#7FD18B;
+  --display:"Frank Ruhl Libre", Georgia, serif; --body:"Heebo", Arial, sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:#14110D;color:var(--ink);font-family:var(--body);overflow:hidden}
+canvas{position:fixed;inset:0;display:block;touch-action:none}
+#overlay{position:fixed;inset:0;pointer-events:none}
+#overlay > *{pointer-events:auto}
+.top{position:absolute;top:calc(12px + env(safe-area-inset-top,0px));left:16px;right:16px;display:flex;justify-content:space-between;gap:8px;align-items:center}
+.chip{background:var(--glass);border:1px solid var(--line);border-radius:999px;padding:8px 14px;font-size:13px;display:flex;gap:8px;align-items:center}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--accent)}
+.msg{position:absolute;top:38%;left:50%;transform:translate(-50%,-50%);width:min(86vw,360px);text-align:center;background:var(--glass);border:1px solid var(--line);border-radius:14px;padding:12px 16px;font-size:15px;line-height:1.5;pointer-events:none}
+.dock{position:absolute;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));max-width:520px;margin-inline:auto;background:var(--glass);border:1px solid var(--line);border-radius:20px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+button{min-height:46px;border-radius:12px;border:1px solid var(--line);background:transparent;color:var(--ink);font:500 15px var(--body);cursor:pointer}
+button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:700}
+button:disabled{opacity:.4}
+.primary{background:var(--accent);color:var(--accent-ink);border:0;font-weight:700;min-height:52px;border-radius:26px;font-size:16px}
+.row{display:flex;gap:10px;align-items:center}
+.row label{font-size:13px;color:var(--muted);white-space:nowrap}
+input[type=range]{flex:1;accent-color:var(--accent);min-height:40px}
+.sheet{position:fixed;inset:0;display:flex;align-items:flex-end;justify-content:center;background:rgba(10,8,6,.6);padding:16px;padding-bottom:calc(24px + env(safe-area-inset-bottom,0px))}
+.card{max-width:480px;width:100%;background:#1E1A14;border:1px solid var(--line);border-radius:22px;padding:24px;display:flex;flex-direction:column;gap:14px}
+.card h1{margin:0;font-family:var(--display);font-size:30px;line-height:1.15}
+.card p{margin:0;line-height:1.65;color:var(--muted);font-size:15px}
+.small{font-size:12px;color:var(--muted);line-height:1.5}
+.warn{color:#F2C46B}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div id="overlay">
+  <div class="top">
+    <div class="chip"><span class="dot" id="dot"></span><span id="status">מוכן</span></div>
+    <button id="exit" hidden style="min-height:40px;padding:0 14px;border-radius:999px;background:var(--glass)">יציאה</button>
+  </div>
+  <div class="msg" id="msg" hidden></div>
+  <div class="dock" id="dock" hidden>
+    <button class="primary" id="place" disabled>הצב את המבצר כאן</button>
+    <div id="controls" hidden style="display:flex;flex-direction:column;gap:10px">
+      <div class="grid2" role="group" aria-label="גודל">
+        <button id="sModel" aria-pressed="true">דגם קטן</button>
+        <button id="sReal" aria-pressed="false">גודל אמיתי</button>
+      </div>
+      <div class="row">
+        <label for="op">שקיפות</label>
+        <input id="op" type="range" min="10" max="100" value="100">
+      </div>
+      <div class="grid3">
+        <button id="rotR" aria-label="סובב ימינה">סובב ימינה</button>
+        <button id="again">הצב מחדש</button>
+        <button id="rotL" aria-label="סובב שמאלה">סובב שמאלה</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="sheet" id="sheet">
+  <div class="card">
+    <h1>חלון לעבר</h1>
+    <p>מבצר מימי הורדוס יעמוד על הקרקע מולך. אפשר להתקרב, להקיף אותו ולעבור בשער. הוא נשאר במקום גם כשאתה זז.</p>
+    <p class="small">עמוד בשטח פתוח ומואר, וכוון את המצלמה אל הקרקע. לגודל אמיתי צריך כ־50 מטר פנויים, למשל מגרש או פארק.</p>
+    <button class="primary" id="start">התחל מציאות רבודה</button>
+    <p class="small warn" id="unsupported" hidden></p>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+  const $ = (id) => document.getElementById(id);
+  const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.xr.enabled = true;
+  document.body.prepend(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(65, innerWidth/innerHeight, 0.01, 800);
+
+  scene.add(new THREE.HemisphereLight(0xfff3dd, 0x6b5a40, 0.8));
+  const sun = new THREE.DirectionalLight(0xffe2b0, 0.9);
+  sun.castShadow = true; sun.shadow.mapSize.set(1024,1024);
+  Object.assign(sun.shadow.camera, {left:-45,right:45,top:45,bottom:-45,near:1,far:200});
+  scene.add(sun); scene.add(sun.target);
+
+  // ---------- The reconstruction. Origin = front centre of the gate, structure extends toward -Z ----------
+  const site = new THREE.Group(); site.visible = false; scene.add(site);
+  const fort = new THREE.Group(); site.add(fort);
+  const mats = [];
+  const M = (color, rough=.9) => { const m = new THREE.MeshStandardMaterial({color, roughness:rough, transparent:true}); mats.push(m); return m; };
+  const stone = M(0xe2cfa6), stoneDark = M(0xc7ae82), roof = M(0xa8532f,.8), wood = M(0x5a3d22), marble = M(0xf1eadb,.6), cloth = M(0x7a2430,1), skin = M(0xb07d58);
+  const box = (w,h,d,mat,x,y,z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat); m.position.set(x,y,z); m.castShadow = m.receiveShadow = true; fort.add(m); return m; };
+  const W = 9, wz = -1.1;
+  box(18,W,2.2,stone,-18,W/2,wz); box(18,W,2.2,stone,18,W/2,wz);
+  box(5.2,W-5.5,2.2,stone,0,W-(W-5.5)/2,wz);
+  for(let x=-26.5;x<=26.5;x+=1.6){ if(Math.abs(x)<9.5 && Math.abs(x)>2.6) continue; box(.9,1,2.3,stone,x,W+.5,wz); }
+  [-7,7].forEach((x)=>{ box(5.6,14,5.6,stoneDark,x,7,wz); for(let k=-2;k<=2;k++){ box(.9,1,.9,stoneDark,x+k*1.15,14.5,wz+2.4); box(.9,1,.9,stoneDark,x+k*1.15,14.5,wz-2.4);} box(1.2,2,.3,wood,x,10,wz+2.85); box(1.4,2.2,.05,cloth,x,12.4,wz+2.85); });
+  const arch = new THREE.Mesh(new THREE.TorusGeometry(2.6,.45,10,24,Math.PI), stoneDark); arch.position.set(0,3.5,wz+1.15); arch.castShadow=true; fort.add(arch);
+  box(.25,3.5,2.2,wood,-2.45,1.75,wz); box(.25,3.5,2.2,wood,2.45,1.75,wz);
+  // side walls closing the courtyard
+  box(2.2,W,40,stone,-26,W/2,wz-20); box(2.2,W,40,stone,26,W/2,wz-20);
+  // colonnade
+  for(let i=0;i<8;i++){ const x=-14+i*4; const c = new THREE.Mesh(new THREE.CylinderGeometry(.42,.48,6.5,18), marble); c.position.set(x,3.25,-15); c.castShadow=true; fort.add(c); box(1.2,.4,1.2,marble,x,6.7,-15); }
+  box(31,.9,2,marble,0,7.35,-15); box(31,.25,6,roof,0,8,-17);
+  // palace
+  box(26,10,14,stone,0,5,-33); box(28,.8,16,stoneDark,0,10.4,-33);
+  const gable = new THREE.Mesh(new THREE.CylinderGeometry(0,9,4,4,1), roof); gable.rotation.y=Math.PI/4; gable.scale.set(1.5,1,.85); gable.position.set(0,12.8,-33); gable.castShadow=true; fort.add(gable);
+  for(let i=0;i<6;i++) box(1.6,3,.2,wood,-10+i*4,4.5,-25.9);
+  // courtyard floor
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(50,38), M(0xcdb68c,1)); floor.rotation.x=-Math.PI/2; floor.position.set(0,.02,-21); floor.receiveShadow=true; fort.add(floor);
+  // people for scale
+  const fig = (x,z,col) => { const g = new THREE.Group(); const b = new THREE.Mesh(new THREE.CylinderGeometry(.22,.3,1.25,10), M(col)); b.position.y=.65; const h = new THREE.Mesh(new THREE.SphereGeometry(.17,12,10), skin); h.position.y=1.45; g.add(b,h); g.children.forEach(c=>c.castShadow=true); g.position.set(x,0,z); fort.add(g); };
+  fig(-1,3,0xe8dcc4); fig(1.2,4,0x8c6a3f); fig(-4,-8,0xd9c49b); fig(5,-12,0x7a2430); fig(-8,-20,0xe8dcc4);
+  // soft shadow on the real ground
+  const shadowPlane = new THREE.Mesh(new THREE.PlaneGeometry(120,120), new THREE.ShadowMaterial({opacity:.35}));
+  shadowPlane.rotation.x = -Math.PI/2; shadowPlane.position.set(0,.005,-20); shadowPlane.receiveShadow = true; site.add(shadowPlane);
+
+  // ---------- Reticle ----------
+  const reticle = new THREE.Mesh(new THREE.RingGeometry(.12,.16,40).rotateX(-Math.PI/2), new THREE.MeshBasicMaterial({color:0xE3A857}));
+  reticle.matrixAutoUpdate = false; reticle.visible = false; scene.add(reticle);
+
+  // ---------- State ----------
+  const SCALES = {model: 1/40, real: 1};
+  let scaleKey = 'model', placed = false, hitSource = null, hitReq = false, session = null;
+  const status = (t, live) => { $('status').textContent = t; $('dot').style.background = live ? 'var(--ok)' : 'var(--accent)'; };
+  const msg = (t) => { const m = $('msg'); if (t){ m.textContent = t; m.hidden = false; } else m.hidden = true; };
+  const applyScale = () => {
+    const s = SCALES[scaleKey]; site.scale.setScalar(s);
+    sun.position.copy(site.position).add(new THREE.Vector3(-30,60,-10).multiplyScalar(s)); sun.target.position.copy(site.position);
+    const e = 45*s; Object.assign(sun.shadow.camera, {left:-e,right:e,top:e,bottom:-e,near:.01,far:200*Math.max(s,.05)}); sun.shadow.camera.updateProjectionMatrix();
+    $('sModel').setAttribute('aria-pressed', String(scaleKey==='model')); $('sReal').setAttribute('aria-pressed', String(scaleKey==='real'));
+  };
+  const applyOpacity = (v) => mats.forEach(m => { m.opacity = v; m.depthWrite = v > .95; });
+
+  // ---------- Placement ----------
+  function place(){
+    if (!reticle.visible) return;
+    const p = new THREE.Vector3().setFromMatrixPosition(reticle.matrix);
+    site.position.copy(p);
+    const cam = new THREE.Vector3(); renderer.xr.getCamera(camera).getWorldPosition(cam);
+    site.rotation.set(0, Math.atan2(cam.x - p.x, cam.z - p.z), 0);
+    site.visible = true; placed = true; reticle.visible = false; applyScale();
+    $('place').hidden = true; $('controls').hidden = false;
+    msg(scaleKey==='real' ? 'השער מולך. אפשר ללכת פנימה.' : 'הקף את הדגם. לחץ "גודל אמיתי" כדי לעמוד מול השער.');
+    setTimeout(()=>msg(null), 3500);
+  }
+  $('place').addEventListener('click', place);
+  $('again').addEventListener('click', () => { placed = false; site.visible = false; $('place').hidden = false; $('controls').hidden = true; msg('כוון אל הקרקע ובחר נקודה חדשה'); });
+  $('sModel').addEventListener('click', () => { scaleKey = 'model'; applyScale(); });
+  $('sReal').addEventListener('click', () => { scaleKey = 'real'; applyScale(); msg('השער בנקודה שבחרת. המבצר נמשך כ־40 מטר לאחור.'); setTimeout(()=>msg(null), 3500); });
+  $('rotR').addEventListener('click', () => site.rotation.y -= Math.PI/12);
+  $('rotL').addEventListener('click', () => site.rotation.y += Math.PI/12);
+  $('op').addEventListener('input', (e) => applyOpacity(e.target.value/100));
+  // taps on the controls should not count as taps on the world
+  $('overlay').addEventListener('beforexrselect', (e) => e.preventDefault());
+
+  // ---------- Session ----------
+  async function startAR(){
+    try{
+      session = await navigator.xr.requestSession('immersive-ar', {requiredFeatures:['hit-test'], optionalFeatures:['dom-overlay','local-floor'], domOverlay:{root:$('overlay')}});
+    }catch(err){
+      $('unsupported').textContent = 'לא הצלחתי לפתוח מציאות רבודה: ' + (err.message || err) + '. ודא ש־"Google Play Services for AR" מותקן ומעודכן, ושהדף נפתח ב־Chrome.';
+      $('unsupported').hidden = false; return;
+    }
+    renderer.xr.setReferenceSpaceType('local');
+    await renderer.xr.setSession(session);
+    $('sheet').hidden = true; $('dock').hidden = false; $('exit').hidden = false; $('place').hidden = false; $('controls').hidden = true;
+    status('מחפש קרקע', false); msg('הזז את הטלפון לאט מצד לצד, עם המצלמה אל הקרקע');
+    session.addEventListener('end', () => { hitSource = null; hitReq = false; placed = false; site.visible = false; reticle.visible = false; $('sheet').hidden = false; $('dock').hidden = true; $('exit').hidden = true; msg(null); status('מוכן', false); });
+    session.addEventListener('select', () => { if (!placed) place(); });
+  }
+  $('exit').addEventListener('click', () => session && session.end());
+  $('start').addEventListener('click', startAR);
+
+  (async () => {
+    const ok = navigator.xr && await navigator.xr.isSessionSupported('immersive-ar').catch(()=>false);
+    if (!ok){
+      $('start').disabled = true;
+      $('unsupported').textContent = 'הדפדפן הזה לא תומך במציאות רבודה. פתח את הקישור ב־Chrome בטלפון אנדרואיד שתומך ב־ARCore, והתקן את "Google Play Services for AR" מחנות Play.';
+      $('unsupported').hidden = false;
+      previewMode();
+    }
+  })();
+
+  // ---------- Desktop / unsupported preview: drag to orbit ----------
+  function previewMode(){
+    site.visible = true; scaleKey = 'real'; applyScale(); scene.background = new THREE.Color(0x9fb8c8);
+    const g = new THREE.Mesh(new THREE.CircleGeometry(200,48), new THREE.MeshStandardMaterial({color:0xb59a6e})); g.rotation.x=-Math.PI/2; g.receiveShadow=true; scene.add(g);
+    let az = 0.5, el = 0.35, dist = 70, drag = null;
+    const cv = renderer.domElement;
+    cv.addEventListener('pointerdown', e => { drag = {x:e.clientX,y:e.clientY,az,el}; });
+    addEventListener('pointerup', () => drag = null);
+    addEventListener('pointermove', e => { if(!drag) return; az = drag.az - (e.clientX-drag.x)*.006; el = Math.max(.05, Math.min(1.3, drag.el + (e.clientY-drag.y)*.004)); });
+    renderer.setAnimationLoop(() => { const c = new THREE.Vector3(0,4,-18); camera.position.set(c.x+dist*Math.sin(az)*Math.cos(el), c.y+dist*Math.sin(el), c.z+dist*Math.cos(az)*Math.cos(el)); camera.lookAt(c); renderer.render(scene, camera); });
+  }
+
+  // ---------- Frame loop ----------
+  renderer.setAnimationLoop((t, frame) => {
+    if (frame){
+      const ref = renderer.xr.getReferenceSpace(); const s = renderer.xr.getSession();
+      if (!hitReq){
+        s.requestReferenceSpace('viewer').then(vs => s.requestHitTestSource({space:vs})).then(src => hitSource = src);
+        hitReq = true;
+      }
+      if (hitSource && !placed){
+        const hits = frame.getHitTestResults(hitSource);
+        if (hits.length){
+          const pose = hits[0].getPose(ref);
+          reticle.visible = true; reticle.matrix.fromArray(pose.transform.matrix);
+          $('place').disabled = false; status('קרקע זוהתה', true);
+          if (!$('msg').hidden && $('msg').textContent.startsWith('הזז')) msg('הקש על "הצב" או על המסך');
+        } else { reticle.visible = false; $('place').disabled = true; }
+      }
+    }
+    renderer.render(scene, camera);
+  });
+
+  addEventListener('resize', () => { camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+  applyScale();
+})();
+</script>
+</body>
+</html>
